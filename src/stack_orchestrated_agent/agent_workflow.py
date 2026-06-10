@@ -193,9 +193,13 @@ class AgentWorkflowService:
             handler = self._handlers.get(workflow_id)
 
             if handler is None:
-                # No handler registered — emit a route task so the agent can
-                # choose a workflow that *does* have a handler.
-                result = self._no_handler_result(project, workflow_id)
+                # No explicit handler — try StepRunner fallback.
+                # If the template's deterministic_steps name registered actions,
+                # the runner can execute them automatically.
+                result = self._try_step_runner(project, workflow_template)
+                if result is None:
+                    # Nothing registered at all — ask agent to route elsewhere.
+                    result = self._no_handler_result(project, workflow_id)
             else:
                 try:
                     result = handler(self, project, template=workflow_template, **kwargs)
@@ -539,6 +543,32 @@ class AgentWorkflowService:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _try_step_runner(
+        project: Path,
+        template: Any,  # WorkflowTemplate
+    ) -> dict[str, Any] | None:
+        """Attempt to execute *template* via the StepRunner.
+
+        Returns a result dict if at least one step has a registered action,
+        otherwise ``None`` (caller should fall back to ``_no_handler_result``).
+        """
+        from .actions import get_action  # noqa: PLC0415
+        from .step_runner import StepRunner  # noqa: PLC0415
+
+        # Only use StepRunner if there is at least one actionable step
+        steps = getattr(template, "deterministic_steps", ())
+        has_action = any(get_action(step) is not None for step in steps)
+        if not has_action:
+            return None
+
+        runner = StepRunner()
+        # Run standalone — without a service handle the runner returns
+        # a flat result (no orchestration task emission).  For full
+        # orchestration, a handler should be registered that passes
+        # ``service`` into ``runner.run()``.
+        return runner.run_standalone(project, template)
 
     @staticmethod
     def _with_stack(result: dict[str, Any], stack: WorkflowStackStore) -> dict[str, Any]:

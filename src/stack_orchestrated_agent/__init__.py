@@ -8,38 +8,55 @@ Core components
 - ``agent_tasks`` — JSON-based program ↔ agent communication protocol.
 - ``proposed_workflow`` — agent-authored workflow plan validation.
 
+Atomic action layer (since 0.2.0)
+----------------------------------
+- ``ActionContext`` / ``ActionResult`` — typed contract for step functions.
+- ``register_action`` / ``get_action`` / ``list_actions`` — action registry.
+- ``StepRunner`` — execute template steps via registered actions, bridging
+  the gap between declaration and implementation.
+
 Quick start::
 
     from stack_orchestrated_agent import (
         AgentWorkflowService,
         WorkflowTemplate,
-        register,
+        ActionContext,
+        ActionResult,
+        register_action,
+        register_template,
     )
 
-    register(WorkflowTemplate(
+    register_template(WorkflowTemplate(
         workflow_id="hello_v1",
         description="A minimal example workflow.",
-        deterministic_steps=("greet", "decide"),
-        agent_cut_points=("needs_decision",),
-        supported_task_types=("agent_review",),
+        deterministic_steps=("greet",),
+        agent_cut_points=(),
+        supported_task_types=(),
     ))
 
-    @AgentWorkflowService.register_handler("hello_v1")
-    def hello_handler(service, project_path, template, **kwargs):
-        return service.emit_route_task(
-            project_path,
-            workflow_id="hello_v1",
-            task_id="route:greeting",
-            reason="needs_decision",
-            summary="Decide: greet the world or greet the user?",
-            recommended_workflow="hello_v1",
-        )
+    def greet(ctx: ActionContext) -> ActionResult:
+        print("hello world")
+        return ActionResult(status="ok")
+
+    register_action("greet", greet)
 
     svc = AgentWorkflowService()
-    result = svc.run("/tmp/demo")
-    print(result["status"])  # → "waiting_for_agent"
+    result = svc.run("/tmp/demo", template="hello_v1")
+    print(result["status"])  # → "completed"
 """
 
+from .actions import (
+    ActionContext,
+    ActionResult,
+    ActionFunc,
+    clear_actions,
+    context_to_dict,
+    get_action,
+    list_actions,
+    register_action,
+    result_to_dict,
+    unregister_action,
+)
 from .agent_tasks import (
     agent_tasks_path,
     clear_agent_tasks,
@@ -63,6 +80,7 @@ from .proposed_workflow import (
     save_proposed_workflow,
     validate_proposed_workflow,
 )
+from .step_runner import StepRunner
 from .workflow_stack import (
     STACK_FILENAME,
     STACK_SCHEMA_VERSION,
@@ -71,14 +89,27 @@ from .workflow_stack import (
 )
 from .workflow_templates import (
     WorkflowTemplate,
-    clear,
+    clear as clear_templates,
     get_template,
     list_templates,
-    register,
-    unregister,
+    register as register_template,
+    unregister as unregister_template,
 )
 
 __all__ = [
+    # --- actions ---
+    "ActionContext",
+    "ActionResult",
+    "ActionFunc",
+    "register_action",
+    "unregister_action",
+    "get_action",
+    "list_actions",
+    "clear_actions",
+    "result_to_dict",
+    "context_to_dict",
+    # --- step runner ---
+    "StepRunner",
     # --- stack ---
     "WorkflowStackStore",
     "workflow_stack_path",
@@ -86,11 +117,11 @@ __all__ = [
     "STACK_SCHEMA_VERSION",
     # --- templates ---
     "WorkflowTemplate",
-    "register",
-    "unregister",
+    "register_template",
+    "unregister_template",
     "get_template",
     "list_templates",
-    "clear",
+    "clear_templates",
     # --- tasks ---
     "agent_tasks_path",
     "clear_agent_tasks",

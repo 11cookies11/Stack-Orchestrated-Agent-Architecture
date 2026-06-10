@@ -12,19 +12,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from stack_orchestrated_agent import (
     AgentWorkflowService,
     WorkflowTemplate,
-    clear,
-    register,
+    clear_actions,
+    clear_templates,
+    register_template,
 )
 
 
 class TestAgentWorkflowService(unittest.TestCase):
     def setUp(self) -> None:
-        clear()
+        clear_templates()
         self.tmpdir = tempfile.TemporaryDirectory()
         self.project = Path(self.tmpdir.name)
 
     def tearDown(self) -> None:
-        clear()
+        clear_templates()
         self.tmpdir.cleanup()
 
     # ------------------------------------------------------------------
@@ -33,7 +34,7 @@ class TestAgentWorkflowService(unittest.TestCase):
 
     def _register_pass_through(self, workflow_id: str = "test_v1") -> None:
         """Register a template + handler that immediately completes."""
-        register(
+        register_template(
             WorkflowTemplate(
                 workflow_id=workflow_id,
                 description="Pass-through workflow for testing.",
@@ -49,7 +50,7 @@ class TestAgentWorkflowService(unittest.TestCase):
 
     def _register_route_needed(self, workflow_id: str = "needs_route_v1") -> None:
         """Register a template + handler that emits a route task."""
-        register(
+        register_template(
             WorkflowTemplate(
                 workflow_id=workflow_id,
                 description="Workflow that needs routing.",
@@ -97,7 +98,7 @@ class TestAgentWorkflowService(unittest.TestCase):
         self.assertEqual(result["reason"], "unknown_template")
 
     def test_run_no_handler_returns_no_handler_status(self) -> None:
-        register(
+        register_template(
             WorkflowTemplate(
                 workflow_id="no_handler_v1",
                 description="Template with no handler.",
@@ -112,7 +113,7 @@ class TestAgentWorkflowService(unittest.TestCase):
 
     def test_choose_route_success(self) -> None:
         self._register_route_needed()
-        register(
+        register_template(
             WorkflowTemplate(
                 workflow_id="target_v1",
                 description="Target workflow.",
@@ -128,7 +129,7 @@ class TestAgentWorkflowService(unittest.TestCase):
         self.assertEqual(result["workflow_id"], "target_v1")
 
     def test_choose_route_when_no_pending_fails(self) -> None:
-        register(
+        register_template(
             WorkflowTemplate(
                 workflow_id="any",
                 description="Any workflow.",
@@ -210,7 +211,7 @@ class TestAgentWorkflowService(unittest.TestCase):
         self.assertNotIn("temp_v1", AgentWorkflowService.list_handlers())
 
     def test_handler_error_is_caught(self) -> None:
-        register(
+        register_template(
             WorkflowTemplate(
                 workflow_id="crashy_v1",
                 description="This handler crashes.",
@@ -232,7 +233,7 @@ class TestAgentWorkflowService(unittest.TestCase):
 
     def test_pushed_workflow_triggers_child_execution(self) -> None:
         """Parent pushes child; stack runs child next loop iteration."""
-        register(
+        register_template(
             WorkflowTemplate(
                 workflow_id="parent_pusher_v1",
                 description="Pushes a child.",
@@ -256,7 +257,7 @@ class TestAgentWorkflowService(unittest.TestCase):
             service.push_workflow(project_path, workflow_id="auto_child_v1", reason="delegate")
             return {"status": "pushed_workflow"}
 
-        register(
+        register_template(
             WorkflowTemplate(
                 workflow_id="auto_child_v1",
                 description="Auto child.",
