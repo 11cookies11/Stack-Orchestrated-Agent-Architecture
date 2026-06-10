@@ -160,3 +160,78 @@ def context_to_dict(ctx: ActionContext) -> dict[str, Any]:
         "template_id": ctx.template_id,
         "data_keys": sorted(ctx.data.keys()) if ctx.data else [],
     }
+
+
+# ---------------------------------------------------------------------------
+# Context persistence — survives across run() / agent invocations
+# ---------------------------------------------------------------------------
+
+CONTEXT_SCHEMA_VERSION = "action_context.v1"
+CONTEXT_FILENAME = "action-context.json"
+
+
+def context_path(project_path: str | Path) -> Path:
+    """Return the path to the persisted action context file."""
+    return Path(project_path) / "build" / CONTEXT_FILENAME
+
+
+def save_context(ctx: ActionContext) -> Path:
+    """Persist *ctx* to disk so it survives across ``run()`` calls.
+
+    Called automatically by ``StepRunner`` after every action execution.
+    External agents can also call this directly after running an action
+    via the CLI to persist state changes for the next workflow run.
+    """
+    path = context_path(ctx.project_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": CONTEXT_SCHEMA_VERSION,
+        "template_id": ctx.template_id,
+        "updated_at": _now_iso(),
+        "data": ctx.data,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
+def load_context(project_path: str | Path, template_id: str = "") -> ActionContext:
+    """Load persisted context from disk, or return a fresh one.
+
+    If the saved ``template_id`` differs from *template_id*, the context
+    is considered stale and a fresh one is returned (prevents data from
+    a different workflow leaking in).
+    """
+    path = context_path(project_path)
+    project = Path(project_path)
+    if path.exists():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            payload = {}
+        saved_template = str(payload.get("template_id", ""))
+        # If template changed, start fresh
+        if template_id and saved_template and saved_template != template_id:
+            return ActionContext(project_path=project, template_id=template_id)
+        data = payload.get("data", {})
+        if not isinstance(data, dict):
+            data = {}
+        return ActionContext(
+            project_path=project,
+            data=data,
+            template_id=template_id or saved_template,
+        )
+    return ActionContext(project_path=project, template_id=template_id)
+
+
+def clear_context(project_path: str | Path) -> None:
+    """Remove the persisted context file (useful in tests or reset)."""
+    path = context_path(project_path)
+    if path.exists():
+        path.unlink()
+
+
+def _now_iso() -> str:
+    """Return current time as ISO-8601 string (UTC, seconds precision)."""
+    from datetime import datetime, timezone  # noqa: PLC0415
+
+    return datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")

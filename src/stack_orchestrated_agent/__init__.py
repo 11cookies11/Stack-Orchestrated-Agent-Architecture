@@ -50,11 +50,15 @@ from .actions import (
     ActionResult,
     ActionFunc,
     clear_actions,
+    clear_context,
+    context_path,
     context_to_dict,
     get_action,
     list_actions,
+    load_context,
     register_action,
     result_to_dict,
+    save_context,
     unregister_action,
 )
 from .agent_tasks import (
@@ -108,6 +112,10 @@ __all__ = [
     "clear_actions",
     "result_to_dict",
     "context_to_dict",
+    "context_path",
+    "load_context",
+    "save_context",
+    "clear_context",
     # --- step runner ---
     "StepRunner",
     # --- stack ---

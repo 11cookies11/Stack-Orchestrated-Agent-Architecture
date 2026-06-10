@@ -73,7 +73,9 @@ def _cmd_action_run(name: str, project: str) -> int:
         )
         return 1
 
-    ctx = ActionContext(project_path=Path(project))
+    from .actions import load_context, save_context  # noqa: PLC0415
+
+    ctx = load_context(Path(project))
     try:
         result = action(ctx)
     except Exception as exc:
@@ -90,6 +92,7 @@ def _cmd_action_run(name: str, project: str) -> int:
         )
         return 1
 
+    save_context(ctx)
     print(json.dumps(result_to_dict(result), ensure_ascii=False, indent=2))
     return 0 if result.is_ok else 2
 

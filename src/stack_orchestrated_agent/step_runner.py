@@ -21,7 +21,9 @@ from .actions import (
     ActionContext,
     ActionResult,
     get_action,
+    load_context,
     result_to_dict,
+    save_context,
 )
 from .workflow_templates import WorkflowTemplate
 
@@ -77,11 +79,14 @@ class StepRunner:
             ``status="completed"``, ``"waiting_for_agent"``, or ``"failed"``.
         """
         project = Path(project_path)
-        ctx = ActionContext(
-            project_path=project,
-            data=dict(initial_data or {}),
-            template_id=template.workflow_id,
-        )
+
+        # Load persisted context — idempotent actions can read prior state.
+        # initial_data is layered on top of persisted data on first load.
+        ctx = load_context(project, template.workflow_id)
+        if initial_data:
+            for key, value in initial_data.items():
+                if key not in ctx.data:
+                    ctx.data[key] = value
 
         for step_index, step_name in enumerate(template.deterministic_steps):
             ctx.step_index = step_index
@@ -89,15 +94,13 @@ class StepRunner:
             # --- resolve action -------------------------------------------------
             action = get_action(step_name)
             if action is None:
-                # Step with no registered action — skip gracefully.
-                # This lets templates declare informational steps that a
-                # domain may choose not to implement yet.
                 continue
 
             # --- execute --------------------------------------------------------
             try:
                 result = action(ctx)
             except Exception as exc:
+                save_context(ctx)
                 if service is not None:
                     return service.emit_route_task(
                         project,
@@ -127,12 +130,13 @@ class StepRunner:
 
             # --- handle result --------------------------------------------------
             if result.is_ok:
-                # Merge action output data into shared context
                 if result.data:
                     ctx.data.update(result.data)
+                save_context(ctx)
                 continue
 
             if result.is_cut_point:
+                save_context(ctx)
                 if service is not None:
                     return service.emit_route_task(
                         project,
@@ -163,6 +167,7 @@ class StepRunner:
                 }
 
             if result.is_error:
+                save_context(ctx)
                 if service is not None:
                     return service.emit_route_task(
                         project,
@@ -193,6 +198,7 @@ class StepRunner:
                 }
 
             # Unknown status — treat as error
+            save_context(ctx)
             if service is not None:
                 return service.emit_route_task(
                     project,
@@ -218,7 +224,10 @@ class StepRunner:
                 "step_name": step_name,
             }
 
-        # All steps completed successfully
+        # All steps completed — context stays on disk.
+        # Clearing is deferred to the caller (or a new template_id
+        # will invalidate it via load_context). This lets parent
+        # workflows on the stack resume with the same context.
         return {
             "ok": True,
             "stage": "workflow",
@@ -241,11 +250,12 @@ class StepRunner:
         Each step result is recorded in ``"steps"``.
         """
         project = Path(project_path)
-        ctx = ActionContext(
-            project_path=project,
-            data=dict(initial_data or {}),
-            template_id=template.workflow_id,
-        )
+        ctx = load_context(project, template.workflow_id)
+        if initial_data:
+            for key, value in initial_data.items():
+                if key not in ctx.data:
+                    ctx.data[key] = value
+
         steps: list[dict[str, Any]] = []
 
         for step_index, step_name in enumerate(template.deterministic_steps):
@@ -275,6 +285,7 @@ class StepRunner:
                         "error_type": type(exc).__name__,
                     }
                 )
+                save_context(ctx)
                 return {
                     "ok": False,
                     "status": "action_error",
@@ -285,8 +296,10 @@ class StepRunner:
             if result.is_ok:
                 if result.data:
                     ctx.data.update(result.data)
+                save_context(ctx)
                 continue
             # Stop on first non-ok result
+            save_context(ctx)
             return {
                 "ok": False if not result.is_ok else True,
                 "status": result.status,

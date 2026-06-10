@@ -50,12 +50,11 @@ class TestAgentLoopEndToEnd(unittest.TestCase):
     def test_full_agent_loop(self) -> None:
         """Agent discovers a cut_point, reads the task, routes, completes."""
         # --- Setup: register a two-step workflow with a cut_point ---
-        # The gate action is idempotent via a file marker so it survives
-        # across run() calls (the framework does not auto-persist context).
+        # The gate action is idempotent via persisted context data.
+        # Context now survives across run() calls automatically.
         def _gate(ctx: ActionContext) -> ActionResult:
             """First step — requires agent confirmation on first pass only."""
-            marker = ctx.project_path / "build" / ".gate_passed"
-            if marker.exists():
+            if ctx.data.get("gate_passed"):
                 return ActionResult(status="ok")
             return ActionResult(
                 status="cut_point",
@@ -64,10 +63,9 @@ class TestAgentLoopEndToEnd(unittest.TestCase):
             )
 
         def _pass_gate(ctx: ActionContext) -> ActionResult:
-            """Mark the gate as passed — called by agent via action run."""
-            marker = ctx.project_path / "build"
-            marker.mkdir(parents=True, exist_ok=True)
-            (marker / ".gate_passed").touch()
+            """Mark the gate as passed — called by agent via action run.
+            Writes to context data which is auto-persisted by the framework."""
+            ctx.data["gate_passed"] = True
             return ActionResult(status="ok")
 
         def _worker(ctx: ActionContext) -> ActionResult:
@@ -116,10 +114,11 @@ class TestAgentLoopEndToEnd(unittest.TestCase):
         #   recommended_workflow: "gated_v1"
         #   allowed_actions: ["confirm_route", "choose_alternative", ...]
 
-        # --- Agent step 3: mark gate as passed + resolve route ---
-        from stack_orchestrated_agent import ActionContext
-        ctx = ActionContext(project_path=self.project)
+        # --- Agent step 3: mark gate as passed via persisted context + resolve route ---
+        from stack_orchestrated_agent import load_context, save_context
+        ctx = load_context(self.project)
         pass_result = _pass_gate(ctx)
+        save_context(ctx)
         self.assertEqual(pass_result.status, "ok")
         route_result = svc.choose_route(
             self.project,
@@ -190,8 +189,7 @@ class TestAgentLoopViaCLI(unittest.TestCase):
         """CLI-level agent loop: register → run → cut → route → complete."""
         # --- Setup templates and actions ---
         def _review(ctx: ActionContext) -> ActionResult:
-            marker = ctx.project_path / "build" / ".reviewed"
-            if marker.exists():
+            if ctx.data.get("reviewed"):
                 return ActionResult(status="ok")
             return ActionResult(
                 status="cut_point",
@@ -200,9 +198,7 @@ class TestAgentLoopViaCLI(unittest.TestCase):
             )
 
         def _approve(ctx: ActionContext) -> ActionResult:
-            marker = ctx.project_path / "build"
-            marker.mkdir(parents=True, exist_ok=True)
-            (marker / ".reviewed").touch()
+            ctx.data["reviewed"] = True
             return ActionResult(status="ok")
 
         def _finalize(ctx: ActionContext) -> ActionResult:

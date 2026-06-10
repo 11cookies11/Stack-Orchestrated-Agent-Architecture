@@ -252,5 +252,118 @@ class TestStepRunner(unittest.TestCase):
         pass  # Requires integration test with AgentWorkflowService — tested in test_agent_workflow
 
 
+class TestContextPersistence(unittest.TestCase):
+    """Context survives across run() calls via build/action-context.json."""
+
+    def setUp(self) -> None:
+        clear_actions()
+        clear_templates()
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.project = Path(self.tmpdir.name)
+
+    def tearDown(self) -> None:
+        clear_actions()
+        clear_templates()
+        self.tmpdir.cleanup()
+
+    def test_save_and_load_context(self) -> None:
+        from stack_orchestrated_agent import save_context, load_context, context_path, clear_context
+
+        ctx = ActionContext(project_path=self.project, template_id="test_v1")
+        ctx.data["step_count"] = 3
+        ctx.data["model"] = {"refs": ["U1", "R1"]}
+        save_context(ctx)
+
+        path = context_path(self.project)
+        self.assertTrue(path.exists())
+
+        loaded = load_context(self.project, "test_v1")
+        self.assertEqual(loaded.data["step_count"], 3)
+        self.assertEqual(loaded.data["model"]["refs"], ["U1", "R1"])
+        self.assertEqual(loaded.template_id, "test_v1")
+
+    def test_load_returns_fresh_when_no_file(self) -> None:
+        from stack_orchestrated_agent import load_context
+
+        ctx = load_context(self.project, "fresh_v1")
+        self.assertEqual(ctx.template_id, "fresh_v1")
+        self.assertEqual(ctx.data, {})
+
+    def test_template_mismatch_returns_fresh(self) -> None:
+        from stack_orchestrated_agent import save_context, load_context
+
+        ctx = ActionContext(project_path=self.project, template_id="old_v1")
+        ctx.data["legacy"] = True
+        save_context(ctx)
+
+        # Different template_id → fresh context
+        fresh = load_context(self.project, "new_v1")
+        self.assertEqual(fresh.template_id, "new_v1")
+        self.assertNotIn("legacy", fresh.data)
+
+    def test_runner_persists_context_between_runs(self) -> None:
+        """After a cut_point, context survives and the gate passes on rerun."""
+        from stack_orchestrated_agent import load_context
+
+        def _gate(ctx: ActionContext) -> ActionResult:
+            if ctx.data.get("approved"):
+                return ActionResult(status="ok")
+            return ActionResult(status="cut_point", reason="needs_approval",
+                                 summary="Agent must approve.", data={"pending": True})
+
+        def _work(ctx: ActionContext) -> ActionResult:
+            ctx.data["done"] = True
+            return ActionResult(status="ok")
+
+        register_action("gate", _gate)
+        register_action("work", _work)
+        register_template(WorkflowTemplate(
+            workflow_id="persist_test_v1", description="x",
+            deterministic_steps=("gate", "work"),
+            agent_cut_points=("needs_approval",),
+            supported_task_types=("agent_review",),
+        ))
+
+        # First run — hits cut_point
+        runner = StepRunner()
+        result1 = runner.run_standalone(self.project, WorkflowTemplate(
+            workflow_id="persist_test_v1", description="x",
+            deterministic_steps=("gate", "work"),
+            agent_cut_points=("needs_approval",),
+            supported_task_types=("agent_review",),
+        ))
+        self.assertEqual(result1["status"], "cut_point")
+
+        # Simulate agent action: set approved flag via persisted context
+        from stack_orchestrated_agent import load_context, save_context
+        ctx = load_context(self.project)
+        ctx.data["approved"] = True
+        save_context(ctx)
+
+        # Second run — gate passes, work runs
+        result2 = runner.run_standalone(self.project, WorkflowTemplate(
+            workflow_id="persist_test_v1", description="x",
+            deterministic_steps=("gate", "work"),
+            agent_cut_points=("needs_approval",),
+            supported_task_types=("agent_review",),
+        ))
+        self.assertEqual(result2["status"], "completed")
+
+    def test_clear_context(self) -> None:
+        from stack_orchestrated_agent import save_context, load_context, clear_context, context_path
+
+        ctx = ActionContext(project_path=self.project)
+        ctx.data["temp"] = True
+        save_context(ctx)
+        self.assertTrue(context_path(self.project).exists())
+
+        clear_context(self.project)
+        self.assertFalse(context_path(self.project).exists())
+
+        # Load returns fresh
+        fresh = load_context(self.project)
+        self.assertEqual(fresh.data, {})
+
+
 if __name__ == "__main__":
     unittest.main()
