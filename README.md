@@ -1,33 +1,86 @@
-# <PROJECT_NAME>
+# Stack-Orchestrated Agent Architecture
 
-<SHORT_DESCRIPTION>
+A deterministic program ↔ AI agent collaboration framework built on a
+**stack-based state machine**. Programs run known steps; at uncertainty
+cut-points they emit structured JSON task files and pause. External agents
+(or humans) read the tasks, make decisions, and hand control back — the
+stack resumes exactly where it left off.
 
 Language: English | [简体中文](README.zh-CN.md)
 
-## Overview
+## Core idea
 
-This is a tech-agnostic GitHub template repository for quickly bootstrapping
-any kind of project (library / service / scripts / docs / learning notes).
+```
+Program (deterministic steps)    Agent (uncertainty decisions)
+        │                              │
+        ├── step 1 ──────────────────► │
+        ├── step 2                     │
+        ├── step 3 → cut point         │
+        │    │                         │
+        │    ▼    agent-tasks.json     │
+        │    ──────────────────────►   │  read / decide / write
+        │    ◄──────────────────────   │
+        │    │                         │
+        ├── resume step 4              │
+        ▼                              ▼
+```
 
-On first use, replace these placeholders:
+The protocol is **filesystem-based**: every interaction passes through
+version-controlled JSON files (`agent-workflow-stack.json`,
+`agent-tasks.json`). No long-running server, no in-memory session state —
+everything is rebuildable after a restart.
 
-- `<PROJECT_NAME>`: project name
-- `<SHORT_DESCRIPTION>`: one-line description
-- `LICENSE`: choose a license that fits your project
-- `.github/ISSUE_TEMPLATE/*`: adjust issue templates to your needs
+## Architecture layers
 
-## Getting started (as a template)
+| Layer | File(s) | Role |
+|-------|---------|------|
+| **WorkflowStackStore** | `workflow_stack.py` | LIFO stack with push/pop/placeholder; persisted to disk |
+| **WorkflowTemplate** | `workflow_templates.py` | Declarative template registry: deterministic steps + agent cut-points |
+| **AgentWorkflowService** | `agent_workflow.py` | Orchestration engine: `while` loop over the stack, dispatch, resume |
+| **AgentTasks** | `agent_tasks.py` | JSON task file read/write — the program ↔ agent protocol |
+| **ProposedWorkflow** | `proposed_workflow.py` | Agent-authored workflow plans with validation |
 
-1. Click **Use this template** on GitHub to create a new repository
-2. Update `README.md` and other basics (e.g. `LICENSE`, `CONTRIBUTING.md`)
-3. Add your code / docs
+## Key design decisions
 
-## Conventions (recommended)
+1. **Stack-based nesting** — workflows can push child workflows; on
+   completion the child pops and the parent resumes. Exactly like a
+   function call stack.
+
+2. **Placeholder routing** — when a milestone fails and the next step is
+   ambiguous, the engine pushes a `__route_pending__` placeholder and asks
+   the agent to `choose_route()`.
+
+3. **Idempotent & resumable** — all state lives on the filesystem. Kill
+   the process, restart, call `run()` again — it picks up from the same
+   stack and task files.
+
+4. **Template-driven** — every workflow declares its deterministic steps
+   and agent cut-points upfront. Adding a new workflow means registering a
+   template + writing one handler function.
+
+5. **Agent-authored workflows** — advanced agents can propose entirely new
+   workflow plans (`agent-proposed-workflow.json`) that pass through a
+   validation layer before execution.
+
+## Getting started
+
+```python
+from orchestration import AgentWorkflowService
+
+service = AgentWorkflowService()
+result = service.run(
+    project_path="/path/to/project",
+    template="full_build_v1",
+)
+# → returns immediately if agent input is needed,
+#   with task file path and "rerun_after_agent": True
+```
+
+## Repository conventions
 
 - Changelog: `CHANGELOG.md` (Keep a Changelog style)
-- Commit messages & PR titles: Conventional Commits (e.g. `feat:`, `fix:`, `chore:`)
+- Commits: Conventional Commits (`feat:`, `fix:`, `chore:`)
 - Community docs: `CONTRIBUTING.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`
-- Issue / PR templates: `.github/`
 
 ## License
 
