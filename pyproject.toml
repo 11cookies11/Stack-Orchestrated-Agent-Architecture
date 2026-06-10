@@ -1,0 +1,32 @@
+[project]
+name = "stack-orchestrated-agent"
+version = "0.1.0"
+description = "Deterministic program ↔ AI agent collaboration framework — stack-based state machine with pluggable domain handlers"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+readme = "README.md"
+authors = [
+    { name = "11cookies11" }
+]
+keywords = ["agent", "orchestration", "workflow", "state-machine", "ai-agent"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "B", "BLE"]
+ignore = ["BLE001"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = false
+warn_return_any = true
+warn_unused_ignores = true
