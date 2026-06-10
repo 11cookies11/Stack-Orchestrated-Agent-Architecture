@@ -544,8 +544,8 @@ class AgentWorkflowService:
     # Internals
     # ------------------------------------------------------------------
 
-    @staticmethod
     def _try_step_runner(
+        self,
         project: Path,
         template: Any,  # WorkflowTemplate
     ) -> dict[str, Any] | None:
@@ -553,6 +553,9 @@ class AgentWorkflowService:
 
         Returns a result dict if at least one step has a registered action,
         otherwise ``None`` (caller should fall back to ``_no_handler_result``).
+
+        Uses ``runner.run()`` (not ``run_standalone``) so that cut_points
+        trigger proper orchestration tasks and stack placeholders.
         """
         from .actions import get_action  # noqa: PLC0415
         from .step_runner import StepRunner  # noqa: PLC0415
@@ -564,11 +567,7 @@ class AgentWorkflowService:
             return None
 
         runner = StepRunner()
-        # Run standalone — without a service handle the runner returns
-        # a flat result (no orchestration task emission).  For full
-        # orchestration, a handler should be registered that passes
-        # ``service`` into ``runner.run()``.
-        return runner.run_standalone(project, template)
+        return runner.run(project, template, self)
 
     @staticmethod
     def _with_stack(result: dict[str, Any], stack: WorkflowStackStore) -> dict[str, Any]:
